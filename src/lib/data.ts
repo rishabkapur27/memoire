@@ -1,6 +1,6 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { db } from "./db";
+import { getSql } from "./db";
 import { type OrderStatus } from "./config";
 import { isOrderable } from "./dates";
 import { totals } from "./pricing";
@@ -54,7 +54,7 @@ const productColumns = `
   is_active as "isActive", sort_order as "sortOrder"`;
 
 export async function listProducts(opts: { includeInactive?: boolean } = {}): Promise<Product[]> {
-  const sql = db();
+  const sql = await getSql();
   const rows = await sql.unsafe<Product[]>(
     `select ${productColumns} from products
      ${opts.includeInactive ? "" : "where is_active"}
@@ -65,7 +65,7 @@ export async function listProducts(opts: { includeInactive?: boolean } = {}): Pr
 
 /** Active products with what is left to book for a bake day. */
 export async function productsWithStock(bakeDate: string): Promise<ProductWithStock[]> {
-  const sql = db();
+  const sql = await getSql();
   const rows = await sql<(Product & { booked: number })[]>`
     select p.id, p.slug, p.name, p.french_name as "frenchName", p.description,
            p.price_inr as "priceInr", p.weight_grams as "weightGrams",
@@ -109,7 +109,7 @@ export async function placeOrder(input: OrderInput): Promise<{ code: string }> {
   if (!isOrderable(input.bakeDate)) {
     throw new OrderError("Orders for that day have closed. Please pick another day.", "bakeDate");
   }
-  const sql = db();
+  const sql = await getSql();
 
   const existing = await sql<{ code: string }[]>`
     select code from orders where client_request_id = ${input.clientRequestId}`;
@@ -186,7 +186,7 @@ const orderColumns = `
 
 export async function getOrderByCode(code: string): Promise<Order | null> {
   if (!/^M-[A-Z2-9]{8}$/.test(code)) return null;
-  const sql = db();
+  const sql = await getSql();
   const rows = await sql.unsafe<Order[]>(
     `select ${orderColumns} from orders o
      left join order_items oi on oi.order_id = o.id
@@ -197,7 +197,7 @@ export async function getOrderByCode(code: string): Promise<Order | null> {
 }
 
 export async function ordersForDate(bakeDate: string): Promise<Order[]> {
-  const sql = db();
+  const sql = await getSql();
   return sql.unsafe<Order[]>(
     `select ${orderColumns} from orders o
      left join order_items oi on oi.order_id = o.id
@@ -208,7 +208,7 @@ export async function ordersForDate(bakeDate: string): Promise<Order[]> {
 }
 
 export async function updateOrderStatus(id: number, status: OrderStatus): Promise<void> {
-  const sql = db();
+  const sql = await getSql();
   await sql`update orders set status = ${status}, updated_at = now() where id = ${id}`;
 }
 
@@ -216,7 +216,7 @@ export async function updateProduct(
   id: number,
   fields: { priceInr: number; dailyCapacity: number; isActive: boolean },
 ): Promise<void> {
-  const sql = db();
+  const sql = await getSql();
   await sql`
     update products set price_inr = ${fields.priceInr}, daily_capacity = ${fields.dailyCapacity},
       is_active = ${fields.isActive}
@@ -225,7 +225,7 @@ export async function updateProduct(
 
 /** Upcoming bake days that have orders, with counts, for the admin date picker. */
 export async function upcomingOrderDays(fromDate: string) {
-  const sql = db();
+  const sql = await getSql();
   return sql<{ bakeDate: string; orders: number; revenue: number }[]>`
     select to_char(bake_date, 'YYYY-MM-DD') as "bakeDate", count(*)::int as orders,
            coalesce(sum(total_inr), 0)::int as revenue
